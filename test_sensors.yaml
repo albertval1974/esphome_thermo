@@ -1,0 +1,56 @@
+esphome:
+  name: testing
+  platform: ESP8266
+  board: d1_mini_lite
+ 
+
+
+
+wifi:
+  ssid: "DJ6ZK"
+  password: "51B4A1AEC7"
+  
+  manual_ip:
+    static_ip: 192.168.1.103
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Diy Thermostat Fallback Hotspot"
+    password: "password"
+
+#captive_portal:
+
+# Enable logging
+logger:
+  level: VERBOSE
+
+# Enable Home Assistant API
+api:
+
+ota:
+
+
+i2c:
+  sda: D2
+  scl: D1
+  frequency: 400khz
+
+
+sensor:
+  
+  - platform: dht
+    model: DHT11
+    pin:
+      number: D3
+      mode: INPUT_PULLUP
+    temperature:
+      name: "Temperature"
+      id: my_temp
+    humidity:
+      name: "Humidity"
+      id: my_humid
+    update_interval: 10s
+
+  

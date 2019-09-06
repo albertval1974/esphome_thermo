@@ -1,0 +1,244 @@
+globals:
+  - id: target_temp
+    type: float
+    restore_value: no
+    initial_value: '22.0'
+  - id: prev_rot
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+
+   # modes 0 = off, 1 = heat, 2 = cool 
+  - id: mode
+    type: int
+    restore_value: yes
+    initial_value: '1'
+  
+esphome:
+  name: thermomatic
+  platform: ESP8266
+  board: nodemcuv2
+  on_boot:
+    priority: -10
+    # ...
+    then:
+      #- output.turn_off: heater
+      - lambda: |-
+          id(mode) = 1;
+
+
+wifi:
+  ssid: "DJ6ZK"
+  password: "51B4A1AEC7"
+  
+  manual_ip:
+    static_ip: 192.168.1.104
+    gateway: 192.168.1.1
+    subnet: 255.255.255.0
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "ThermOmatic Fallback Hotspot"
+    password: "password"
+
+#captive_portal:
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+
+ota:
+
+sensor:
+  - platform: dht
+    model: DHT22
+    pin: D1
+    temperature:
+      name: "Temperature"
+      id: my_temp
+      #filters:
+        #convert temp to F
+      #  - lambda: return x * (9.0/5.0) + 32.0;
+      unit_of_measurement: "°C"
+    humidity:
+      name: "Humidity"
+      id: my_humid
+    update_interval: 20s
+
+#   - platform: rotary_encoder
+#     name: "Temperature Dial"
+#     id:  "temp_dial"
+#     pin_a: 
+#       number: D2
+#       mode: INPUT_PULLUP
+#       #inverted: True
+#     pin_b:
+#       number: D5
+#       mode: INPUT_PULLUP
+#       #inverted: True
+#     resolution: 4
+#     #min_value:  
+#     #max_value: 35
+#     #unit_of_measurement: "°C"
+#     #filters:
+#     #  - debounce: 0.1s
+      
+#     on_value:
+#       then:
+#         - lambda: |-
+#             static float new_value = 0.0;
+#             if (x < id(prev_rot)) {
+#               new_value = std::max(id(thermostat_controller).target_temperature_low - 1.0, 10.0);
+#             } else if (x > id(prev_rot)) {
+#               new_value = std::min(id(thermostat_controller).target_temperature_low + 1.0, 35.0);
+#             }
+#             auto call = id(thermostat_controller).make_call();
+#             call.set_target_temperature_low(new_value);
+#             call.set_target_temperature_high(new_value + 1.0);
+#             call.perform();
+           
+#             id(prev_rot)=x;
+#             ESP_LOGD("stuff", "x: %f prev_rot: %f tt: %f" , x, id(prev_rot), id(thermostat_controller).target_temperature_low);
+# # Rotary encoder button..
+# binary_sensor:
+#   - platform: gpio
+#     pin: 
+#       number: D6
+#       mode: INPUT_PULLUP
+#       inverted: True
+#     name: "Option"
+#     id: option_select
+#     #filters:
+#     #  - delayed_on: 10ms
+#     on_multi_click:
+#     - timing:
+#         - ON for at most 1s
+#         - OFF for at most 1s
+#         - ON for at most 1s
+#         - OFF for at least 0.2s
+#       then:
+#         - logger.log: "Double Clicked"
+#     - timing:
+#         - ON for 1s to 2s
+#         - OFF for at least 0.5s
+#       then:
+#         - logger.log: "Single Long Clicked"
+#         - script.execute: next_mode
+        
+#     - timing:
+#         - ON for at most 1s
+#         - OFF for at least 0.5s
+#       then:
+#         - logger.log: "Single Short Clicked"
+#     - timing:
+#         - ON for at least 3.0s
+#       then:
+#         - logger.log: "Held for 3s"
+      
+
+
+# text_sensor:
+#   platform: version 
+#   id: "therm_status"
+#   name: "Therm Status"
+
+# i2c:
+#   sda: GPIO10
+#   scl: GPIO09
+
+# display:
+#   - platform: lcd_pcf8574
+#     dimensions: 18x2
+#     #address: 0x3F
+#     address: 0x27
+#     lambda: |-
+#       it.printf(0,0, "T: %.0f TT: %.0f \n M: %i", id(my_temp).state, id(thermostat_controller).target_temperature_low,id(mode));
+
+# script:
+#   - id: next_mode
+#     then:
+#     - script.execute: do_idle
+#     - lambda: |- 
+#         if(id(mode)==2){
+#           id(mode)=0;
+#           } else {
+#             id(mode) += 1;
+#           }
+#         auto call = id(thermostat_controller).make_call();
+#         call.set_target_temperature_low(id(my_temp).state);
+#         call.set_target_temperature_high(id(my_temp).state + 1.0);
+#         call.perform(); 
+
+#   - id: fan_cooldown
+#     then:
+#       - delay: 2s
+#       - switch.turn_off: fan
+
+#   - id: do_heat
+#     then:
+#     - lambda: |-
+#         if(id(mode)==1){
+#           id(heater).turn_on();
+#           id(fan).turn_on();
+#         }
+
+#   - id: do_cool
+#     then:
+#     - lambda: |-
+#         if(id(mode)==2){
+#           id(cooler).turn_on();
+#           id(fan).turn_on();
+#         }
+
+#   - id: do_idle
+#     then:
+#       - switch.turn_off: heater 
+#       - switch.turn_off: cooler 
+#       #- script.execute: fan_cooldown
+#       #- delay: 2s
+#       - switch.turn_off: fan
+
+# # switch:
+# #   - platform: gpio
+# #     name: "Heater"
+# #     id: heater
+# #     pin: D3
+
+# switch:
+#   - platform: gpio
+#     #name: "Heater"
+#     id: heater
+#     pin: D6
+#   - platform: gpio
+#     #name: "Cooler"
+#     id: cooler
+#     pin: D7
+#   - platform: gpio
+#     #name: "Fan"
+#     id: fan
+#     pin: D8
+ 
+
+# climate:
+#   - platform: bang_bang
+#     id: thermostat_controller
+#     name: "Thermostat"
+#     sensor: my_temp
+#     visual:
+#       min_temperature: 10 °C
+#       max_temperature: 35 °C
+#       temperature_step: 1
+
+#     default_target_temperature_low: 20 °C
+#     default_target_temperature_high: 23 °C
+
+#     heat_action:
+#       - script.execute: do_heat
+#     cool_action:
+#       - script.execute: do_cool
+#     idle_action:
+#       - script.execute: do_idle
+    
