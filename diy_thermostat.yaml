@@ -10,7 +10,7 @@ esphome:
       - switch.turn_off: cooler
       - switch.turn_off: fan
       - lambda: |-
-          id(tmode).publish_state("OFF");
+          id(tmode).publish_state("HEAT");
           id(edit_mode).publish_state(false);
 
 
@@ -31,14 +31,14 @@ wifi:
 
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
-    ssid: "THX1138"
+    ssid: !secret wifi_ap_ssid
     password: !secret wifi_ap_password
 
 #captive_portal:
 
 # Enable logging
 logger:
-  level: VERBOSE
+  level: INFO
 
 # Enable Home Assistant API
 api:
@@ -64,6 +64,8 @@ i2c:
   scl: D1
   frequency: 400khz
 
+substitutions:
+  fan_cooldown_timeout: 5s
 globals:
   - id: target_temp
     type: float
@@ -78,6 +80,8 @@ globals:
   - id: dial_fwd
     type: bool 
     initial_value: 'true'
+  
+ 
 
 text_sensor:
   - platform: template 
@@ -94,25 +98,39 @@ text_sensor:
 
 
 switch:
- 
   - platform: gpio
     id: heater
+    name: "heater"
     pin: D0
     interlock: [cooler]
-
+    on_turn_on:
+      - switch.turn_on: fan
+    on_turn_off:
+      script.execute: fan_shutdown
+        
   - platform: gpio
     id: cooler
+    name: "cooler"
     pin: D7
     interlock: [heater]
+    on_turn_on:
+      - switch.turn_on: fan
+    on_turn_off:
+      script.execute: fan_shutdown
+      
       
   - platform: gpio
     id: fan
+    name: "fan"
     pin: D8
+
    
   - platform: template
     name: "Edit Mode"
     id: edit_mode
-  
+
+
+ 
 
 sensor:
   - platform: template
@@ -121,21 +139,6 @@ sensor:
     lambda: |-
       id(target_temp) = id(thermostat_controller).target_temperature_low * (9.0/5.0) + 32.0;
       return id(target_temp);
-
-  - platform: template
-    id: fan_cooldown
-    on_value:
-      - if:
-          condition:
-            for:
-              time: 5s
-              condition:  
-                and: 
-                  - switch.is_off: heater
-                  - switch.is_off: cooler
-                  - switch.is_on: fan
-          then:
-          - switch.turn_off: fan
 
   - platform: template
     id: my_tempX
@@ -246,14 +249,37 @@ binary_sensor:
                 id(edit_mode).publish_state(true);
 
 script:
+  - id: fan_shutdown
+    then:
+      if: 
+        condition:
+          lambda:  return id(tmode).state.compare("FAN")==0;
+        then: 
+          # fan mode is on, dont turn off
+        else:
+          - delay: ${fan_cooldown_timeout}
+          - if:
+              condition:
+                for: 
+                  time: ${fan_cooldown_timeout}
+                  condition:
+                    and:
+                    - switch.is_off: heater
+                    - switch.is_off: cooler
+              then:
+                - switch.turn_off: fan
+
+
   - id: selected_mode
     then: 
     - lambda: |-
         id(tmode).publish_state(id(display_mode).state);
         if(id(tmode).state.compare("FAN")==0) {
           id(display_page).publish_state("fan_mode_page");
+          id(fan).turn_on();
         } else {
           id(display_page).publish_state("main_page");
+         
         }
 
   - id: chose_mode
@@ -351,65 +377,31 @@ climate:
     default_target_temperature_low: 22 °C
     default_target_temperature_high: 23 °C
 
-    heat_action:
-     
       # the bang bang as currently implemented does not function as US style thermostats. 
       # we must therefore manage our own modes.   
-    
-      - lambda: |-
-          if(id(tmode).state.compare("HEAT")==0){
-            id(heater).turn_on();
-            id(cooler).turn_off();
-
-            if(id(fan).state){
-              // fan already on
-            } else {
-              id(fan).turn_on();
-            }
-          }
-
-          if(id(tmode).state.compare("FAN")==0){ 
-            if(id(fan).state){
-              // fan already on
-            } else {
-              id(fan).turn_on();
-            }
-          }
+    heat_action:
+      if:
+        condition:
+          lambda: return id(tmode).state.compare("HEAT")==0;
+         
+        then:
+          - switch.turn_on: heater
+          - switch.turn_off: cooler
 
     cool_action:
-      - lambda: |-
-          if(id(tmode).state.compare("COOL")==0){
-            id(cooler).turn_on();
-            id(heater).turn_off();
-
-            if(id(fan).state){
-              // fan already on
-            } else {
-              id(fan).turn_on();
-            }
-          }
-          if(id(tmode).state.compare("FAN")==0){ 
-            if(id(fan).state){
-              // fan already on
-            } else {
-              id(fan).turn_on();
-            }
-          }
+      if:
+        condition:
+          lambda: return id(tmode).state.compare("COOL")==0;
+      
+        then:
+          - switch.turn_on: cooler
+          - switch.turn_off: heater
 
     idle_action:
-    
-      - lambda: |-
-          if(id(tmode).state.compare("HEAT")==0){
-            id(heater).turn_off();
-          } else if (id(tmode).state.compare("COOL")==0){
-            id(cooler).turn_off();
-          }
-          //if not in FAN mode then turn off fan
-          if(id(tmode).state.compare("FAN")!=0){
-            id(fan).turn_off();
-           //id(fan_cooldown).publish_state(true);
-          }
-
+      - switch.turn_off: heater
+      - switch.turn_off: cooler
+     
+          
 
 
 
