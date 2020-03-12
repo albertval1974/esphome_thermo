@@ -9,10 +9,17 @@ esphome:
       - switch.turn_off: heater
       - switch.turn_off: cooler
       - switch.turn_off: fan
+      - climate.control:
+          id: thermostat_controller
+          mode: HEAT
       - lambda: |-
+          id(run_mode).publish_state("hvac");
+          //id(edit_mode).publish_state(false);
+          id(target_temp_high) = (id(target_temp)) + (id(Width) );
+          id(target_temp_low) = (id(target_temp)) - (id(Width) );
+          id(idle_page).show();
           
-          id(edit_mode).publish_state(false);
-
+          
 
 # assignments
 
@@ -38,7 +45,7 @@ wifi:
 
 # Enable logging
 logger:
-  level: DEBUG
+  level: INFO
 
 # Enable Home Assistant API
 api:
@@ -87,20 +94,55 @@ globals:
     restore_value: no
     initial_value: '0.0'
 
-  - id: dial_fwd
-    type: bool 
-    initial_value: 'true'
+  # - id: dial_fwd
+  #   type: bool 
+  #   initial_value: 'true'
   
-  - id: dial_stopped
-    type: int
-    initial_value: '1'
+  # - id: dial_stopped
+  #   type: int
+  #   initial_value: '1'
 
-  - id: bang_bang_width
+  - id: Width
     type: float
     restore_value: 'true'
-    initial_value: '8.0'
+    initial_value: '3.0'
 
+  - id: Low_Offset
+    type: float
+    restore_value: 'true'
+    initial_value: '4.0'
+
+  - id: High_Offset
+    type: float
+    restore_value: 'true'
+    initial_value: '4.0'
+
+  - id: Min_Run
+    type: float
+    restore_value: 'true'
+    initial_value: '10.0'
   
+  - id: Max_Run
+    type: float
+    restore_value: 'true'
+    initial_value: '4.0'
+
+  - id: Fan_Over
+    type: float
+    restore_value: 'true'
+    initial_value: '5.0'
+
+
+  - id: setting_value
+    type: float
+    initial_value: '0.0'
+  
+  - id: setting_val_max
+    type: float
+
+  - id: setting_val_min
+    type: float
+   
  
 
 text_sensor:
@@ -109,12 +151,20 @@ text_sensor:
     name: "tMode"
     
   - platform: template
-    id: display_mode
+    id: selected_option
     name: "Display Mode"
-  
+     
   - platform: template
     id: display_page
+  
+  - platform: template
+    id: setting_var_name
+  
+  - platform: template
+    id: run_mode
     
+  - platform: template
+    id: dial_dir
 
 
 switch:
@@ -205,46 +255,83 @@ sensor:
 
     on_value:
       then:
-        - script.stop: set_bang_bang_temps
         - lambda: |-
-              static float new_value = 0.0;
-              id(dial_stopped) = 0;
-              if (x < id(prev_rot)) {
-                id(dial_fwd) = true;
-                if(id(edit_mode).state) {
-                  //if in edit mode select prev option
-                  id(chose_mode).execute();
-                } else {
-                  new_value = std::max(id(target_temp) - 1.0, 32.0);
-                }
-              } else if (x > id(prev_rot)) {
-                id(dial_fwd) = false;
-                if(id(edit_mode).state) {
-                  //if in edit mode select prev option
-                  id(chose_mode).execute();
-                } else {
-                  new_value = std::min(id(target_temp) + 1.0, 90.0);
-                }
+            //for all options.. 
+            static float new_value = 0.0;
+            id(ui_timeout).stop();
+            
+            if (x < id(prev_rot)) {
+              id(dial_dir).publish_state("bkw");
+            } else if (x > id(prev_rot)) {
+              id(dial_dir).publish_state("fwd");
+            }
+            // ****************************
+            //               hvac 
+            //******************************
+            if(id(run_mode).state == "hvac") {
+              id(set_thermostat).show();
+              id(set_bang_bang_temps).stop();
+              //static float new_value = 0.0;
+              if (id(dial_dir).state == "bkw") {
+                new_value = std::max(id(target_temp) - 1.0, 32.0);
+              } else if (id(dial_dir).state == "fwd") {
+                new_value = std::min(id(target_temp) + 1.0, 90.0);
               }
-              if (id(edit_mode).state == false) {
-                id(target_temp) = new_value;    
-                //id(target_temp_low) = (((id(target_temp) - 32) * (5.0 / 9.0)) - ((id(bang_bang_width) * 0.5)));
-                //id(target_temp_high) = (((id(target_temp) - 32) * (5.0 / 9.0)) + ((id(bang_bang_width) * 0.5)));
-                
-                id(target_temp_high) = (id(target_temp)) + (id(bang_bang_width) * 0.5);
-                id(target_temp_low) = (id(target_temp)) - (id(bang_bang_width) * 0.5);
-
-                  
-                id(set_bang_bang_temps).execute();
+              id(target_temp) = new_value;    
+              id(target_temp_high) = (id(target_temp)) + (id(High_Offset) );
+              id(target_temp_low) = (id(target_temp)) - (id(Low_Offset) );
+              id(set_bang_bang_temps).execute();
+            
+            // ************************************
+            //          select_setting
+            // ************************************
+            } else if(id(run_mode).state == "select_setting") {
+              static int i = 0;
+              if(id(dial_dir).state == "fwd"){
+                if(i == 4){
+                    i = 0;
+                } else { i ++;}
+              } else {
+                if(i == 0){
+                    i = 4;
+                } else { i --;}
               }
-              id(prev_rot)=x;
-              ESP_LOGD("stuff", "x: %f prev_rot: %f tt: %f" , x, id(prev_rot), new_value);
-              //id(dial_stopped)=1;
-              
+              // do items base on i
+              if(i == 0){
+                id(selected_option).publish_state("High_Offset");
+              } else if (i == 1) {
+                id(selected_option).publish_state("Low_Offset");
+              } else if (i == 2) {
+                id(selected_option).publish_state("Max_Run");
+              } else if (i == 3) {
+                id(selected_option).publish_state("Fan_Over");
+              } else if (i == 4) {
+                id(selected_option).publish_state("Info");
+              } 
+            
+            // *****************************************
+            //                 edit_setting
+            // *****************************************
+            } else if(id(run_mode).state == "setting_selected") {
+              if (id(dial_dir).state == "bkw") {
+                //new_value = std::max(id(target_temp) - 1.0, 32.0);
+                new_value = id(setting_value) - 1.0;
+              } else if (id(dial_dir).state == "fwd") {
+                new_value = id(setting_value) + 1.0;
+              }
+              id(setting_value) = new_value;
+            }
+            id(ui_timeout).execute();
+            id(prev_rot)=x;
         - component.update: oled_display
         - logger.log: 
-            format: "The dial_stopped value %d"
-            args: [ 'id(dial_stopped)' ]
+            level: INFO
+            format: "run_mode: %s, selected_option: %s, setting_value: %.0f, setting_var_name"
+            args: [id(run_mode).state.c_str(), id(selected_option).state.c_str(), id(setting_value)]
+
+
+              
+
 # Rotary encoder button..
 binary_sensor:
   - platform: gpio
@@ -255,50 +342,76 @@ binary_sensor:
     name: "Option"
     id: option_select
 
-    
+    #####  DOUBLE CLICK TO EDIT SELECTED SETTING
+    on_double_click:
+      then:
+        - script.stop: ui_timeout
+        - lambda: id(ui_timeout).execute();     
+        - lambda: |-
+            if(id(run_mode).state == "select_setting"){
+              //sitch to setting selected mode...
+              id(settings_page).show();
+              id(run_mode).publish_state("setting_selected");
+              if(id(selected_option).state == "High_Offset") {
+                  id(setting_value) = id(High_Offset);
+              } else if(id(selected_option).state == "Low_Offset") {
+                  id(setting_value) = id(Low_Offset);
+              } else if(id(selected_option).state == "Max_Run") {
+                  id(setting_value) = id(Max_Run);
+              } else if(id(selected_option).state == "Fan_Over") {
+                  id(setting_value) = id(Fan_Over);
+              } else if(id(selected_option).state == "Info") {
+                id(info_page).show();
+              }
+              
+            }
+        - component.update: oled_display
+    ######  HOLD FOR 3s TO ENTER SETTINGS MENU        
     on_multi_click:
-      # ##### turn on select option mode (edit_mode)
-       - timing:
-           - ON for at least 4.0s
-         then:
-          - display.page.show: select_mode_page
-          - globals:
-            id: edit_mode
-            value: true
-            
-          #- lambda: |-
-          #        //id(cooler).turn_off();
-          #        //id(heater).turn_off();
-          #        //id(fan).turn_off();
-          #        //id(tmode).publish_state(id(display_mode).state);
-          #        //id(tmode).update();
-          #        
-          #        id(edit_mode).publish_state(true);
-            
+      - timing:
+        - ON for at least 3.0s
+        then:
+          - script.stop: ui_timeout
+          - lambda: id(ui_timeout).execute();     
+          - lambda: |-
+              if(id(run_mode).state.compare("hvac")==0){
 
-    # on_multi_click:
-    # # ##### turn on select option mode (edit_mode)
-    #  - timing:
-    #      - ON for at least 4.0s
-    #    then:
-    #      if:
-    #       condition:
-    #         switch.is_on: edit_mode
-    #       then:
-    #         #- display.page.show: main_page
-    #         - lambda: |-
-    #             id(cooler).turn_off();
-    #             id(heater).turn_off();
-    #             id(fan).turn_off();
-    #             //id(tmode).publish_state(id(display_mode).state);
-    #             //id(tmode).update();
-    #             id(edit_mode).publish_state(false);
-    #       else:
-    #         - display.page.show: select_mode_page
-    #         - lambda: |-
-    #             id(edit_mode).publish_state(true);
+                //switch to select_setting mode...
+                id(chose_setting_page).show();
+                id(run_mode).publish_state("select_setting");
+              }
+      #####  HOLD FOR 1s TO SAVE SETTING   
+      - timing:
+        - ON for at least 1.0s
+        then:
+          - script.stop: ui_timeout
+          - lambda: id(ui_timeout).execute();     
+          - lambda: |-
+                if(id(run_mode).state == "setting_selected"){
+                  if(id(selected_option).state == "High_Offset") {
+                      id(High_Offset) = id(setting_value);
+                  } else if(id(selected_option).state == "Low_Offset") {
+                      id(Low_Offset) = id(setting_value);
+                  } else if(id(selected_option).state == "Max_Run") {
+                      id(Max_Run) = id(setting_value);
+                  } else if(id(selected_option).state == "Fan_Over") {
+                     id(Fan_Over) = id(setting_value);
+                  }
+                  
+                  id(setting_saved_page).show();
+                  id(run_mode).publish_state("setting_save");
+                } 
 
+      
 script:
+  - id: ui_timeout
+    then:
+      - delay: '5s'
+      - lambda: |-
+          id(run_mode).publish_state("hvac");
+          id(idle_page).show();
+      - component.update: oled_display
+
   - id: set_bang_bang_temps
     then:
       - delay: ${dial_cooldown_timeout}
@@ -307,7 +420,7 @@ script:
             call.set_target_temperature_low((id(target_temp_low) - 32) * (5.0 / 9.0));
             call.set_target_temperature_high((id(target_temp_high) - 32) * (5.0 / 9.0));
             call.perform();
-            id(dial_stopped)=1;
+
 
   - id: fan_shutdown
     then:
@@ -318,8 +431,10 @@ script:
           # fan mode is on, dont turn off
           - lambda: id(tmode).publish_state("fan");
         else:
-          - lambda: id(tmode).publish_state("fc");
+          - lambda: id(tmode).publish_state("fan");
           - delay: ${fan_cooldown_timeout}
+         
+          #- delay: !lambda "return id(Fan_Over);"
           - if:
               condition:
                 for: 
@@ -332,116 +447,32 @@ script:
                 - switch.turn_off: fan
                 - lambda: id(tmode).publish_state("IDLE");
 
-
-  - id: selected_mode
-    then: 
-    - lambda: |-
-        if(id(display_mode).state.compare("Return")==0){
-          id(display_page).publish_state("main_page");
-        } else {
-          id(display_page).publish_state("settings_page");
-        }
-
-  - id: chose_mode
-    then:
-    - lambda: |-
-
-        // careate a list of option
-        // if dial_fwd select next item in list
-                
-        static int i = 0;
-        if(id(dial_fwd)){
-          if(i == 5){
-            i = 0;
-          } else { i ++;}
-        } else {
-          if(i == 0){
-            i = 4;
-          } else { i --;}
-        }
-
-        // do items base on i
-        if(i == 0){
-          id(display_mode).publish_state("Set Width");
-        } else if (i == 1) {
-          id(display_mode).publish_state("Min Run Time");
-        } else if (i == 2) {
-          id(display_mode).publish_state("Max Run Time");
-        } else if (i == 3) {
-          id(display_mode).publish_state("Fan Over Run");
-        } else if (i == 4) {
-          id(display_mode).publish_state("Info");
-        } else if (i == 5) {
-          id(display_mode).publish_state("Return");
-        }
-
-
-
-# display:
-#   - platform: ssd1306_i2c
-#     model: "SSD1306 128x64"
-#     #reset_pin: D0
-#     address: 0x3C
-#     id: oled_display
-#     #display modes 
-#     # 1 = show Large current temp and medium target
-#     # 2 = show Larget Target Temp and medium current temp
-#     #   ______________
-#     #  |       AAAAAA 
-#     #  |yyy    AAAAAA 
-#     #  |       AAAAAA 
-#     #  |xxxx   AAAAAA
-    
-#     pages:
-#       - id: main_page
-#         lambda: |-
-#           //main page
-          
-          
-#           // A areaa
-#           //it.printf(35, 30, id(font_giant), "%.0f", id(thermostat_controller).target_temperature_low);
-#           it.printf(35, 30, id(font_giant), "%.0f", id(target_temp));
-
-         
-#           // YYY area
-#           it.printf(0, 20, id(font_medium), "%.0f", id(my_temp).state * (9.0/5.0) + 32.0);
-        
-
-#           // XXX area
-#           if(id(dial_stopped)==0){
-#             it.printf(0, 50, id(font_small), "%.0f : %.0f",id(target_temp_low),id(target_temp_high)) ;
-#           } else {
-#             it.printf(0, 50, id(font_small), "%s",id(tmode).state.c_str());
-#           }
-#       - id: select_mode_page
-#         lambda: |-
-#           it.print(0,5, id(font_small), "Rotate To Select");
-#           it.printf(20, 32, id(font_large), "%s",id(display_mode).state.c_str());
-#           it.print(0,42, id(font_medium), "Push To Set");
-
-#       - id: fan_mode_page
-#         lambda: |-
-#           it.printf(20, 32, id(font_large), "Fan Only");
-#           it.print(0,42, id(font_medium), "Push and hold to change");
-
 display:
   - platform: ssd1306_i2c
     model: "SSD1306 128x64"
     #reset_pin: D0
     address: 0x3C
     id: oled_display
-    #display modes 
-    # 1 = show Large current temp and medium target
-    # 2 = show Larget Target Temp and medium current temp
-    #   ______________
-    #  |      CCCCC
-    #  |aa BB CCCCC DD ee        
-    #  |   BB CCCCC DD 
-    #  |
-    #  |
-    
+   
     pages:
-      - id: main_page
+      - id: loading_page
+        lambda: |-
+          it.printf(0,10, id(font_small), " ... ");
+          it.printf(0,20, id(font_small), "please wait");
+
+      - id: idle_page
+        lambda: |-
+          it.printf(1, 10, id(font_medium), "%.0f", id(target_temp_low));
+
+          it.printf(42, 20 , id(font_large), "%.0f", id(my_temp).state * (9.0/5.0) + 32.0);
+
+          it.printf(106, 10, id(font_medium), "%.0f", id(target_temp_high));
+
+          //it.printf(1, 55, id(font_medium), "%.0f", id(my_temp).state * (9.0/5.0) + 32.0);
+          
+          it.printf(50, 45, id(font_small), "%s",id(tmode).state.c_str());    
+      
+      - id: set_thermostat
         lambda: |-
           //main page
               
@@ -451,27 +482,36 @@ display:
 
           it.printf(106, 10, id(font_medium), "%.0f", id(target_temp_high));
 
-          it.printf(1, 55, id(font_medium), "%.0f", id(my_temp).state * (9.0/5.0) + 32.0);
+          //it.printf(1, 55, id(font_medium), "current temp: %.0f", id(my_temp).state * (9.0/5.0) + 32.0);
+
+          it.printf(20, 45, id(font_small), "target temp");
           
-          it.printf(50, 45, id(font_small), "%s",id(tmode).state.c_str());
+          //it.printf(50, 45, id(font_small), "%s",id(tmode).state.c_str());
 
 
 
 
-      - id: select_mode_page
+      - id: chose_setting_page
         lambda: |-
-          it.print(1,5, id(font_small), "Settings");
-          it.printf(1, 32, id(font_medium), "%s",id(display_mode).state.c_str());
-          it.print(1,45, id(font_medium), "Push To Select");
-
-      - id: fan_mode_page
-        lambda: |-
-          it.printf(20, 32, id(font_large), "Fan Only");
-          it.print(0,42, id(font_medium), "Push and hold to change");
+          it.printf(1,5, id(font_small), "Settings");
+          it.printf(1, 32, id(font_medium), "%s",id(selected_option).state.c_str());
+          it.printf(1,45, id(font_small), "dobule click to edit");
 
       - id: settings_page
         lambda: |-
-          it.print(0,42, id(font_medium), "settings page");
+          it.printf(0,10, id(font_medium), "set %s", id(selected_option).state.c_str());
+          it.printf(50,38, id(font_large), "%.0f", id(setting_value));
+          it.printf(20,60, id(font_small), "press to save");
+    
+      - id: setting_saved_page
+        lambda: it.printf(20,60, id(font_small), "saved");
+
+      - id: info_page
+        lambda: |-
+          it.printf(0,10, id(font_small), "Dan Scott");
+          it.printf(0,20, id(font_small), "TBD");
+      
+      
 
 
 climate:
@@ -487,8 +527,6 @@ climate:
     default_target_temperature_low: 22 °C
     default_target_temperature_high: 23 °C
 
-      # the bang bang as currently implemented does not function as US style thermostats. 
-      # we must therefore manage our own modes.   
     heat_action:
         - switch.turn_on: heater
         - switch.turn_off: cooler
