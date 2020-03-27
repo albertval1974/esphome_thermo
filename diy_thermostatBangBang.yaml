@@ -3,7 +3,7 @@ esphome:
   platform: ESP8266
   board: d1_mini_lite
   on_boot:
-    priority: -10.0
+    priority: -100.0
     #...
     then:
       - switch.turn_off: heater
@@ -11,13 +11,20 @@ esphome:
       - switch.turn_off: fan
       - climate.control:
           id: thermostat_controller
-          mode: HEAT
+          mode: AUTO
       - lambda: |-
           id(run_mode).publish_state("hvac");
-          //id(edit_mode).publish_state(false);
-          id(target_temp_high) = (id(target_temp)) + (id(Width) );
-          id(target_temp_low) = (id(target_temp)) - (id(Width) );
           id(idle_page).show();
+          id(target_temp_high) = (id(target_temp)) + (id(High_Offset) );
+          id(target_temp_low) = (id(target_temp)) - (id(Low_Offset) );
+          // set target temp low to cause threashold crossing when setting to actual values
+          // bang bang thermostat only triggers when threasholds are crossed...  could have state code?
+          auto call = id(thermostat_controller).make_call();
+          call.set_target_temperature_low(0);
+          call.set_target_temperature_high(1);
+          call.perform();
+          id(set_bang_bang_temps).execute();
+        
           
           
 
@@ -66,6 +73,23 @@ font:
     id: font_giant
     size: 70
 
+image:
+  - file: "images/hassio_qr_code.png"
+    id: "url_qr_code" 
+    resize: 64x64
+
+  - file: "images/fire.png"
+    id: "icon_fire" 
+    resize: 25x25
+  
+  - file: "images/snowflake.png"
+    id: "icon_snow" 
+    resize: 25x25
+  
+  - file: "images/fan.png"
+    id: "icon_fan" 
+    resize: 25x25
+  
 i2c:
   sda: D2
   scl: D1
@@ -83,10 +107,12 @@ globals:
 
   - id: target_temp_low
     type: float
+    restore_value: yes
     initial_value: '0.0'
 
   - id: target_temp_high
     type: float
+    restore_value: yes
     initial_value: '0.0'
     
   - id: prev_rot
@@ -148,11 +174,11 @@ globals:
 text_sensor:
   - platform: template 
     id: "tmode"
-    name: "tMode"
+    #name: "tMode"
     
   - platform: template
     id: selected_option
-    name: "Display Mode"
+    #name: "Display Mode"
      
   - platform: template
     id: display_page
@@ -170,7 +196,7 @@ text_sensor:
 switch:
   - platform: gpio
     id: heater
-    name: "heater"
+    #name: "heater"
     pin: D0
     interlock: [cooler]
     on_turn_on:
@@ -181,7 +207,7 @@ switch:
         
   - platform: gpio
     id: cooler
-    name: "cooler"
+    #name: "cooler"
     pin: D7
     interlock: [heater]
     on_turn_on:
@@ -193,12 +219,12 @@ switch:
       
   - platform: gpio
     id: fan
-    name: "fan"
+    #name: "fan"
     pin: D8
 
    
   - platform: template
-    name: "Edit Mode"
+    #name: "Edit Mode"
     id: edit_mode
 
 
@@ -219,11 +245,11 @@ sensor:
 
   - platform: bmp085
     temperature:
-      name: "Temperature"
+      #name: "Temperature"
       id: my_temp
       unit_of_measurement: "°C"
     pressure:
-      name: "Pressure"
+      #name: "Pressure"
       id: my_humid
     update_interval: 5s
 
@@ -243,7 +269,7 @@ sensor:
   #   update_interval: 10s
 
   - platform: rotary_encoder
-    name: "Temperature Dial"
+    # name: "Temperature Dial"
     id:  "temp_dial"
     pin_a: 
       number: D5
@@ -275,7 +301,7 @@ sensor:
               if (id(dial_dir).state == "bkw") {
                 new_value = std::max(id(target_temp) - 1.0, 32.0);
               } else if (id(dial_dir).state == "fwd") {
-                new_value = std::min(id(target_temp) + 1.0, 90.0);
+                new_value = std::min(id(target_temp) + 1.0, 100.0);
               }
               id(target_temp) = new_value;    
               id(target_temp_high) = (id(target_temp)) + (id(High_Offset) );
@@ -326,7 +352,7 @@ sensor:
         - component.update: oled_display
         - logger.log: 
             level: INFO
-            format: "run_mode: %s, selected_option: %s, setting_value: %.0f, setting_var_name"
+            format: "run_mode: %s, selected_option: %s, setting_value: %.0f"
             args: [id(run_mode).state.c_str(), id(selected_option).state.c_str(), id(setting_value)]
 
 
@@ -339,14 +365,15 @@ binary_sensor:
       number: D4
       mode: INPUT_PULLUP
       inverted: true
-    name: "Option"
+    # name: "Option"
     id: option_select
 
     #####  DOUBLE CLICK TO EDIT SELECTED SETTING
     on_double_click:
       then:
         - script.stop: ui_timeout
-        - lambda: id(ui_timeout).execute();     
+        - script.stop: ui_timeout_long
+        - lambda: id(ui_timeout_long).execute();     
         - lambda: |-
             if(id(run_mode).state == "select_setting"){
               //sitch to setting selected mode...
@@ -372,19 +399,25 @@ binary_sensor:
         - ON for at least 3.0s
         then:
           - script.stop: ui_timeout
-          - lambda: id(ui_timeout).execute();     
+          - script.stop: ui_timeout_long
+          - lambda: id(ui_timeout_long).execute();     
           - lambda: |-
               if(id(run_mode).state.compare("hvac")==0){
 
                 //switch to select_setting mode...
                 id(chose_setting_page).show();
                 id(run_mode).publish_state("select_setting");
+              } else {
+                id(idle_page).show();
+                id(run_mode).publish_state("hvac");
               }
+
       #####  HOLD FOR 1s TO SAVE SETTING   
       - timing:
         - ON for at least 1.0s
         then:
           - script.stop: ui_timeout
+          - script.stop: ui_timeout_long
           - lambda: id(ui_timeout).execute();     
           - lambda: |-
                 if(id(run_mode).state == "setting_selected"){
@@ -404,9 +437,31 @@ binary_sensor:
 
       
 script:
+  # - id: init
+  #   then:
+  #     - delay: '5s'
+  #     - lambda: |-
+  #         //static float cur_max_temp=id(thermostat_controller).target_temperature_high;
+  #         //static float cur_min_temp=id(thermostat_controller).target_temperature_low;
+  #         //force startup to cross climate threashold to do the right action on current conditions.. 
+  #         //setting the high low values here 
+  #         auto call = id(thermostat_controller).make_call();
+  #         //call.set_target_temperature_low(1.0);
+  #         //call.set_target_temperature_high(2.0);
+  #         call.perform();
+
+
   - id: ui_timeout
     then:
-      - delay: '5s'
+      - delay: '3s'
+      - lambda: |-
+          id(run_mode).publish_state("hvac");
+          id(idle_page).show();
+      - component.update: oled_display
+  
+  - id: ui_timeout_long
+    then:
+      - delay: '30s'
       - lambda: |-
           id(run_mode).publish_state("hvac");
           id(idle_page).show();
@@ -420,6 +475,10 @@ script:
             call.set_target_temperature_low((id(target_temp_low) - 32) * (5.0 / 9.0));
             call.set_target_temperature_high((id(target_temp_high) - 32) * (5.0 / 9.0));
             call.perform();
+      - logger.log: 
+          level: INFO
+          format: "climate mode: , current_temp: %.0f, low_target: %.0f, high_target: %.0f"
+          args: [id(my_temp).state, id(thermostat_controller).target_temperature_low, id(thermostat_controller).target_temperature_high]
 
 
   - id: fan_shutdown
@@ -462,34 +521,28 @@ display:
 
       - id: idle_page
         lambda: |-
-          it.printf(1, 10, id(font_medium), "%.0f", id(target_temp_low));
-
+          it.printf(1, 10, id(font_medium), "%.0f", id(thermostat_controller).target_temperature_low * (9.0/5.0) + 32.0);
           it.printf(42, 20 , id(font_large), "%.0f", id(my_temp).state * (9.0/5.0) + 32.0);
-
-          it.printf(106, 10, id(font_medium), "%.0f", id(target_temp_high));
-
-          //it.printf(1, 55, id(font_medium), "%.0f", id(my_temp).state * (9.0/5.0) + 32.0);
+          it.printf(106, 10, id(font_medium), "%.0f", id(thermostat_controller).target_temperature_high * (9.0/5.0) + 32.0);
           
-          it.printf(50, 45, id(font_small), "%s",id(tmode).state.c_str());    
+          if(id(heater).state) {
+            it.image(25,40, id(icon_fire));
+          }
+          if(id(cooler).state) {
+            it.image(60,40, id(icon_snow));
+          } 
+          if(id(fan).state) {
+            it.image(85,40, id(icon_fan));
+          }
+          //it.printf(50, 45, id(font_small), "%s",id(tmode).state.c_str());    
       
       - id: set_thermostat
         lambda: |-
           //main page
-              
-          it.printf(1, 10, id(font_medium), "%.0f", id(target_temp_low));
-
-          it.printf(42, 20 , id(font_large), "%.0f", id(target_temp));
-
-          it.printf(106, 10, id(font_medium), "%.0f", id(target_temp_high));
-
-          //it.printf(1, 55, id(font_medium), "current temp: %.0f", id(my_temp).state * (9.0/5.0) + 32.0);
-
-          it.printf(20, 45, id(font_small), "target temp");
-          
-          //it.printf(50, 45, id(font_small), "%s",id(tmode).state.c_str());
-
-
-
+          it.printf(1, 7, id(font_medium), "%.0f", id(target_temp_low));
+          it.printf(42, 38 , id(font_large), "%.0f", id(target_temp));
+          it.printf(102, 7, id(font_medium), "%.0f", id(target_temp_high));
+          it.printf(10, 60, id(font_small), "SET TARGET TEMP");
 
       - id: chose_setting_page
         lambda: |-
@@ -508,11 +561,8 @@ display:
 
       - id: info_page
         lambda: |-
-          it.printf(0,10, id(font_small), "Dan Scott");
-          it.printf(0,20, id(font_small), "TBD");
-      
-      
-
+            it.image(0, 0, id(url_qr_code));            
+        
 
 climate:
   - platform: bang_bang
@@ -524,22 +574,23 @@ climate:
       #max_temperature: 90 °F
       temperature_step: 1
 
-    default_target_temperature_low: 22 °C
-    default_target_temperature_high: 23 °C
+    default_target_temperature_low: 0 °C
+    default_target_temperature_high: 1 °C
 
     heat_action:
-        - switch.turn_on: heater
-        - switch.turn_off: cooler
+      - switch.turn_on: heater
+      - switch.turn_off: cooler
 
     cool_action:
-        - switch.turn_on: cooler
-        - switch.turn_off: heater
+      - switch.turn_on: cooler
+      - switch.turn_off: heater
 
     idle_action:
       - switch.turn_off: heater
       - switch.turn_off: cooler
-     
-          
+  
+ 
+        
 
 
 
